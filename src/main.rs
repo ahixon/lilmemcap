@@ -8,6 +8,7 @@
 
 #[macro_use]
 mod serial;
+mod pd;
 
 extern crate compiler_builtins;
 extern crate embedded_hal as hal;
@@ -324,12 +325,12 @@ fn main() {
 
 	// register 0x28 on rk808 should read back 0b00011111 = 31
 	let mut rk808_buf:[u8; 1] = [0; 1];
-	i2c0.read_from(RK808_ADDR, Some(0x23), &mut rk808_buf);
+	i2c0.read_from(RK808_ADDR, Some(0x23), &mut rk808_buf).expect("read DCDC_EN_REG");
 	let current_dcdc = rk808_buf[0];
 
 	println!("DCDC_EN_REG: {:?}", rk808_buf);
 
-	i2c0.read_from(RK808_ADDR, Some(0x24), &mut rk808_buf);
+	i2c0.read_from(RK808_ADDR, Some(0x24), &mut rk808_buf).expect("read LDO_EN_REG");
 	println!("LDO_EN_REG: {:?}", rk808_buf);
 
 	// disable LDO1, LDO2, LDO4, LDO5, LDO7
@@ -340,48 +341,39 @@ fn main() {
 		!(1 << 4) &
 		!(1 << 6);
 
-	i2c0.write_to(RK808_ADDR, Some(0x24), &rk808_buf);
+	i2c0.write_to(RK808_ADDR, Some(0x24), &rk808_buf).expect("update LDO_EN_REG");
 
-	i2c0.read_from(RK808_ADDR, Some(0x24), &mut rk808_buf);
+	i2c0.read_from(RK808_ADDR, Some(0x24), &mut rk808_buf).expect("re-read LDO_EN_REG");
 	println!("LDO_EN_REG now: {:?}", rk808_buf);
 
 	// GPU
-	i2c0.read_from(SYR838_ADDR, Some(0x00), &mut rk808_buf);
+	i2c0.read_from(SYR838_ADDR, Some(0x00), &mut rk808_buf).expect("read GPU VSEL0");
 	println!("GPU VSEL0: {:?}", rk808_buf);
 
-	i2c0.read_from(SYR838_ADDR, Some(0x05), &mut rk808_buf);
+	let disabled_syr:[u8; 1] = [rk808_buf[0] & !(1 << 7); 1];
+
+	i2c0.read_from(SYR838_ADDR, Some(0x05), &mut rk808_buf).expect("read GPU VGOOD");
 	println!("GPU VGOOD: {:?}", rk808_buf);
 
-	let disabled_syr:[u8; 1] = [151 & !(1 << 7); 1];
 	println!("Changing VSEL0 and VSEL1 to: {:?}", disabled_syr);
+	i2c0.write_to(SYR838_ADDR, Some(0x00), &disabled_syr).expect("update GPU VSEL0");
+	i2c0.write_to(SYR838_ADDR, Some(0x01), &disabled_syr).expect("update GPU VSEL1");
 
-	let res = i2c0.write_to(SYR838_ADDR, Some(0x00), &disabled_syr);
-	println!("GPU VSEL0 update result: {:?}", res);
-	let res = i2c0.write_to(SYR838_ADDR, Some(0x01), &disabled_syr);
-	println!("GPU VSEL1 update result: {:?}", res);
-
-	i2c0.read_from(SYR838_ADDR, Some(0x00), &mut rk808_buf);
+	i2c0.read_from(SYR838_ADDR, Some(0x00), &mut rk808_buf).expect("re-read GPU VSEL0");
 	println!("GPU VSEL0 now: {:?}", rk808_buf);
+
+	i2c0.read_from(SYR838_ADDR, Some(0x05), &mut rk808_buf).expect("re-read GPU VGOOD");
+	println!("GPU VGOOD now: {:?}", rk808_buf);
 
 	// disable VSW0 and VSW1
 	rk808_buf[0] = current_dcdc & !(1 << 5) & !(1 << 6);
 
-	i2c0.write_to(RK808_ADDR, Some(0x23), &mut rk808_buf);
+	i2c0.write_to(RK808_ADDR, Some(0x23), &mut rk808_buf).expect("disable VSW0, VSW1");
 
-	i2c0.read_from(RK808_ADDR, Some(0x23), &mut rk808_buf);
+	i2c0.read_from(RK808_ADDR, Some(0x23), &mut rk808_buf).expect("read VSW result");
 	println!("DCDC_EN_REG now: {:?}", rk808_buf);
 
 	read_ina219(&i2c4);
-
-	// VDD_CPU_B
-	// i2c0.read_from(SYR837_ADDR, 0x00, &mut rk808_buf);
-	// println!("VDD_CPU_B VSEL0: {:?}", rk808_buf);
-
-	// println!("Result: {:?}...", res);
-
-	// setup_clocks();
-	// println!("finished clock setup!\n");
-	// return;
 
 	// okay, so PWRDN_CON seems to be used to turn on/off power domains
 	// (after idling the bus via the PMU as well)
@@ -389,113 +381,101 @@ fn main() {
 
 	let pmu = unsafe { &*rk3399_m0::PMU.get() };
 
-	println!("gmac on? {:?}", pmu.pmu_pwrdn_st.read().pd_gmac_pwr_stat().bit_is_clear());
+    pd::disable_isp0(pmu);
+    pd::disable_vo(pmu);
+    pd::disable_edp(pmu);
+    pd::disable_iep(pmu);
+    pd::disable_rga(pmu);
+    pd::disable_gic(pmu);
+    pd::disable_gpu(pmu);
 
-	// if already in state we want to transition to, we're done
-	// otherwise...
+    pd::disable_usb3(pmu);
+    pd::disable_isp1(pmu);
+    pd::disable_perihp(pmu);
+    pd::disable_hdcp(pmu);
+    pd::disable_gmac(pmu);
+    pd::disable_vdu(pmu);
+    pd::disable_emmc(pmu);
+    pd::disable_sdioaudio(pmu);
+    
+    pd::disable_tcpd0(pmu);
+    pd::disable_tcpd1(pmu);
+    pd::disable_sd(pmu);
 
-	// if we want to turn it on, we call `pmu_power_domain_ctr`
-	// which enables the power domain
-
-	// now we handle the bus via `pmu_bus_idle_req`
-	// if we're turning on, we request the bus go active
-	// if we're turning off, we request the bus go idle:
-	pmu.pmu_bus_idle_req.modify(|_, w| w.idle_req_gmac().bit(true));
-
-	let mut bus_timeout = true;
-	for _ in 1..MAX_WAIT_COUNT {
-		let bus_state = pmu.pmu_bus_idle_st.read().idle_gmac().bit_is_set();
-		let bus_ack = pmu.pmu_bus_idle_ack.read().idle_ack_gmac().bit_is_set();
-
-		// while ((bus_state != bus_req || bus_ack != bus_req)
-		// and bus_req = state ? bus_id : 0  (ie target for bit is 1 if turn off, or bit unset if turning on)
-		if bus_ack || bus_state {
-			bus_timeout = false;
-			break;
-		}
+    // SCU turns off now?
+    unsafe {
+	    pmu.pmu_cci500_con.write(|w| 
+	    	w.write_enable().bits(
+	    		1 << 1  |
+	    		1 << 6  |
+	    		1 << 7
+			).
+	    	clr_preq_cci500().set_bit().
+	    	clr_qreq_cci500().set_bit().
+	    	qgating_cci500_cfg().set_bit()
+		);
 	}
 
-	if bus_timeout {
-		println!("had timeout while idling bus");
-		println!("gmac bus state was idle? {:?}", pmu.pmu_bus_idle_st.read().idle_gmac().bit_is_set());
-		println!("gmac bus state had idle acknoledge? {:?}", pmu.pmu_bus_idle_ack.read().idle_ack_gmac().bit_is_set());
-	}
+	// TODO: probably actually just need to set PWRMODE_CON
 
-	// if we're powering on, we're done! it has power and the bus is back
-	// if we're powering off, we finally need to disable the power domain:
-	pmu.pmu_pwrdn_con.modify(|_, w| w.pd_gmac_pwrdwn_en().bit(true));
+    pmu.pmu_cpu0apm_con.write(|w| w.cpu_l0_wfi_pwrdn_en().set_bit());
+    pmu.pmu_cpu0bpm_con.write(|w| w.cpu_b0_wfi_pwrdn_en().set_bit());
+
+    pmu.pmu_cpu1apm_con.write(|w| w.cpu_l1_wfi_pwrdn_en().set_bit());
+    pmu.pmu_cpu1bpm_con.write(|w| w.cpu_b0_wfi_pwrdn_en().set_bit());	// FIXME: doc typo
+
+    pmu.pmu_cpu2apm_con.write(|w| w.cpu_l2_wfi_pwrdn_en().set_bit());
+    pmu.pmu_cpu3apm_con.write(|w| w.cpu_l3_wfi_pwrdn_en().set_bit());
+
+    unsafe { asm!("dsb sy"); }
+
+    // need to idle request via ADB400
+    unsafe {
+	    pmu.pmu_adb400_con.write(|w| w.
+	    	write_enable().bits(
+	    		1 << 9  |
+	    	  	1 << 10 |
+	    	 	1 << 11
+	    	).
+	    	clr_core_l().set_bit().
+	    	clr_core_l_2gic().set_bit().
+	    	clr_gic2_core_l().set_bit()
+		);
+
+		pmu.pmu_adb400_con.write(|w| w.
+	    	write_enable().bits(
+	    		1 << 1
+	    	).
+	    	pwrdwn_req_core_l().set_bit()
+		);
+	}
 
 	unsafe { asm!("dsb sy"); }
 
-	// now, keep checking to see if it actually turned off
-	let mut pd_timeout = true;
-	for _ in 1..MAX_WAIT_COUNT {
-		let powered_off = pmu.pmu_pwrdn_st.read().pd_gmac_pwr_stat().bit_is_set();
-		if powered_off {
-			pd_timeout = false;
-			break;
-		}
-	}
+	// # mmio_write_32(PMU_BASE + PMU_ADB400_CON,
+	// # 		      BIT_WITH_WMSK(PMU_PWRDWN_REQ_CORE_B_2GIC_SW) |
+	// # 		      BIT_WITH_WMSK(PMU_PWRDWN_REQ_CORE_B_SW) |
+	// # 		      BIT_WITH_WMSK(PMU_PWRDWN_REQ_GIC2_CORE_B_SW));
+	// #
 
-	if pd_timeout {
-		println!("had timeout while disabling power domain");
-		println!("pmu_pwrdn_st: {:?}", pmu.pmu_pwrdn_st.read().bits());
-	}
+    // pd::disable_cci(pmu);
 
-	println!("gmac on? {:?}", pmu.pmu_pwrdn_st.read().pd_gmac_pwr_stat().bit_is_clear());
+    pd::disable_a72_b1(pmu);
+    pd::disable_a72_b0(pmu);
 
-	// turn off a bunch of shit
-	pmu.pmu_pwrdn_con.modify(|_, w| unsafe { 
-		// USB PHY
-		w.pd_tcpd0_pwrdwn_en().bit(true)
-		.pd_tcpd1_pwrdwn_en().bit(true)
+    pd::disable_a53_l2(pmu);
+    pd::disable_a53_l3(pmu);
+    pd::disable_a53_l0(pmu);
+    pd::disable_a53_l1(pmu);
 
-		.pd_perihp_pwrdwn_en().bit(true)
 
-		.pd_rga_pwrdwn_en().bit(true)		// for LCD stuff
-		.pd_iep_pwrdwn_en().bit(true)		// image enhancement
-		.pd_vo_pwrdwn_en().bit(true)		// VOP (video out)
-		.pd_isp1_pwrdwn_en().bit(true)	// ISP 1
-		.pd_hdcp_pwrdwn_en().bit(true)	// HDCP
-
-		.pd_vdu_pwrdwn_en().bit(true)		// video decode unit
-		// vcodec has venc and vdec, which we DO need
-
-		.pd_gpu_pwrdwn_en().bit(true)		// GPU
-
-		// gigabit mac
-		// if you powerdown GMAC, then reading
-		// some of the power related registers causes
-		// aborts for some reason
-		.pd_gmac_pwrdwn_en().bit(true)
-
-		.pd_usb3_pwrdwn_en().bit(true)	// USB3
-		.pd_edp_pwrdwn_en().bit(true)		// DisplayPort
-		// .pd_sdioaudio_pwrdwn_en().bit(true)
-		.pd_sd_pwrdwn_en().bit(true)
-
-		// scu is snoop control unit i think
-		// for cache coherence
-
-		// cci is cache coherence interface
-
-		// in theory we can turn them all off
-		// though we might have to reconfigure the buses
-
-		// turn off the other little core
-		// FIXME: core0 has _en name from TRM but others don't.. wtf Rockchip
-		.pd_a53_l0_pwrdwn_en().bit(true)
-		.pd_a53_l1_pwrdwn().bit(true)
-		.pd_a53_l2_pwrdwn().bit(true)
-		.pd_a53_l3_pwrdwn().bit(true)
-
-		// turn off the big cores
-		.pd_a72_b0_pwrdwn_en().bit(true)
-		.pd_a72_b1_pwrdwn_en().bit(true)
-	});
+    pd::disable_scu_l(pmu);
+    pd::disable_scu_b(pmu);
 
 	println!("finished pmu change");
 
+	// clock::setup_clocks();
+	// println!("finished clock setup\n");
 
 	// print_clocks();
 
@@ -515,10 +495,42 @@ fn main() {
 	// gpio0.gpio_swporta_ddr.modify(|r, w| unsafe { w.bits(r.bits() | 1 << 13) });
 	// gpio0.gpio_swporta_dr.modify(|r, w| unsafe { w.bits(r.bits() | 1 << 13) });
 
-	// println!("disabliong VDD_CPU_B...");
-	// let res = i2c0.write_to(SYR837_ADDR, Some(0x00), &disabled_syr);
-	// let res = i2c0.write_to(SYR837_ADDR, Some(0x01), &disabled_syr);
-	// println!("VDD_CPU_B update result: {:?}", res);
+	// FIXME: i don't think this works right, we should see more of a mA drop...
+	i2c0.read_from(SYR837_ADDR, Some(0x00), &mut rk808_buf).expect("read VDD_GPU_B VSEL0");
+	println!("VDD_GPU_B VSEL0: {:?}", rk808_buf);
+
+	let disabled_syr:[u8; 1] = [rk808_buf[0] & !(1 << 7); 1];
+
+	i2c0.read_from(SYR837_ADDR, Some(0x05), &mut rk808_buf).expect("read VDD_GPU_B VGOOD");
+	println!("VDD_GPU_B VGOOD: {:?}", rk808_buf);
+
+	println!("Disabling VDD_CPU_B...");
+	i2c0.write_to(SYR837_ADDR, Some(0x00), &disabled_syr).expect("VDD_GPU_B VSEL0");
+	i2c0.write_to(SYR837_ADDR, Some(0x01), &disabled_syr).expect("VDD_GPU_B VSEL1");
+
+	i2c0.read_from(SYR837_ADDR, Some(0x00), &mut rk808_buf).expect("re-read VDD_CPU_B VSEL0");
+	println!("VDD_CPU_B VSEL0 now: {:?}", rk808_buf);
+
+	i2c0.read_from(SYR837_ADDR, Some(0x05), &mut rk808_buf).expect("re-read VDD_CPU_B VGOOD");
+	println!("VDD_CPU_B VGOOD now: {:?}", rk808_buf);
+
+	println!("Disabling BUCK2 (VDD_CPU_L)...");
+	// tell RK808 to disable little core
+	let mut dcdc_buf:[u8; 1] = [0; 1];
+	i2c0.read_from(RK808_ADDR, Some(0x23), &mut dcdc_buf).expect("read DCDC after PMU");
+
+	println!("DCDC_EN_REG: {:?}", dcdc_buf);
+
+	// little core is BUCK2
+	dcdc_buf[0] = dcdc_buf[0] & !(1 << 1);
+	i2c0.write_to(RK808_ADDR, Some(0x23), &dcdc_buf).expect("clear BUCK2");
+
+	i2c0.read_from(RK808_ADDR, Some(0x23), &mut rk808_buf).expect("read BUCK2 result");
+	println!("DCDC_EN_REG now: {:?}", rk808_buf);
+
+	for _ in 0..100 {
+		print!(".");
+	}
 
 	read_ina219(&i2c4);
 }
