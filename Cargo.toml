@@ -1,0 +1,13 @@
+[package]
+name = "lilmemcap"
+version = "0.1.0"
+authors = ["Alex Hixon <alex@alexhixon.com>"]
+
+[dependencies]
+rk3399-m0 = { version = "0.1.0", path = "../rk3399-m0/" }
+cortex-m = "0.2.4"
+cortex-m-rt = "0.2.0"
+
+[profile.release]
+lto = true
+debug = true
