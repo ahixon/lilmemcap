@@ -8,6 +8,8 @@ rk3399-m0 = { version = "0.1.0", path = "../rk3399-m0/" }
 rockchip = { version="0.1.0", path = "../feo/deps/rockchip/" }
 embedded-hal = { git = "https://github.com/japaric/embedded-hal.git", rev = "7d904f515d15fd5fe7ea34e18820ea83e2651fa2" }
 
+# compiler_builtins = { git = "https://github.com/rust-lang-nursery/compiler-builtins", features = ["mem"] }
+
 cortex-m = "0.2.4"
 cortex-m-rt = "0.2.0"
 
